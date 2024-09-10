@@ -9,7 +9,7 @@ from functools import lru_cache
 import numpy as np
 
 if t.TYPE_CHECKING:
-    from ragas.metrics.base import Metric
+    from base_metrics import Metric
     from ragas.testset.evolutions import Evolution
 
 DEBUG_ENV_VAR = "RAGAS_DEBUG"

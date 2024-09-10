@@ -157,7 +157,6 @@ NLI_STATEMENTS_MESSAGE = Prompt(
         },
     ],
     input_keys=["context", "statements"],
-    output_key="answer",
     output_type="json",
     language="english",
 )  # noqa: E501

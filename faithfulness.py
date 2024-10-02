@@ -8,25 +8,20 @@ from dataclasses import dataclass, field
 import numpy as np
 from langchain_core.pydantic_v1 import BaseModel, Field
 
-from dataset_schema import SingleTurnSample
 from output_parser import RagasoutputParser, get_json_format_instructions
 from prompt import Prompt
-from base_metrics import (
-    MetricType,
-    MetricWithLLM,
-    SingleTurnMetric,
-    ensembler,
-    get_segmenter,
-)
+from base_metrics import EvaluationMode, MetricWithLLM, ensembler, get_segmenter
 
 if t.TYPE_CHECKING:
     from langchain_core.callbacks import Callbacks
 
     from prompt import PromptValue
 
+from typing import Any, Protocol
 
-class HasSegmentMethod(t.Protocol):
-    def segment(self, text) -> t.Any:
+
+class HasSegmentMethod(Protocol):
+    def segment(self, text) -> Any:
         ...
 
 
@@ -169,17 +164,9 @@ NLI_STATEMENTS_MESSAGE = Prompt(
 
 
 @dataclass
-class Faithfulness(MetricWithLLM, SingleTurnMetric):
+class Faithfulness(MetricWithLLM):
     name: str = "faithfulness"  # type: ignore
-    _required_columns: t.Dict[MetricType, t.Set[str]] = field(
-        default_factory=lambda: {
-            MetricType.SINGLE_TURN: {
-                "user_input",
-                "response",
-                "retrieved_contexts",
-            }
-        }
-    )
+    evaluation_mode: EvaluationMode = EvaluationMode.qac  # type: ignore
     nli_statements_message: Prompt = field(
         default_factory=lambda: NLI_STATEMENTS_MESSAGE
     )
@@ -212,7 +199,7 @@ class Faithfulness(MetricWithLLM, SingleTurnMetric):
     def _create_nli_prompt(self, row: t.Dict, statements: t.List[str]) -> PromptValue:
         assert self.llm is not None, "llm must be set to compute score"
 
-        contexts = row["retrieved_contexts"]
+        contexts = row["contexts"]
         # check if the statements are support in the contexts
         contexts_str: str = "\n".join(contexts)
         statements_str: str = json.dumps(statements)
@@ -224,7 +211,7 @@ class Faithfulness(MetricWithLLM, SingleTurnMetric):
     def _create_statements_prompt(self, row: t.Dict) -> PromptValue:
         assert self.sentence_segmenter is not None, "sentence_segmenter is not set"
 
-        text, question = row["response"], row["user_input"]
+        text, question = row["answer"], row["question"]
         sentences = self.sentence_segmenter.segment(text)
         sentences = [
             sentence for sentence in sentences if sentence.strip().endswith(".")
@@ -248,12 +235,6 @@ class Faithfulness(MetricWithLLM, SingleTurnMetric):
             score = np.nan
 
         return score
-
-    async def _single_turn_ascore(
-        self, sample: SingleTurnSample, callbacks: Callbacks
-    ) -> float:
-        row = sample.dict()
-        return await self._ascore(row, callbacks)
 
     async def _ascore(self: t.Self, row: t.Dict, callbacks: Callbacks) -> float:
         """
@@ -335,8 +316,6 @@ class Faithfulness(MetricWithLLM, SingleTurnMetric):
 @dataclass
 class FaithulnesswithHHEM(Faithfulness):
     name: str = "faithfulness_with_hhem"  # type: ignore
-    device: str = "cpu"
-    batch_size: int = 10
 
     def __post_init__(self):
         try:
@@ -348,7 +327,6 @@ class FaithulnesswithHHEM(Faithfulness):
         self.nli_classifier = AutoModelForSequenceClassification.from_pretrained(
             "vectara/hallucination_evaluation_model", trust_remote_code=True
         )
-        self.nli_classifier.to(self.device)
         super().__post_init__()
 
     def _create_pairs(
@@ -360,13 +338,6 @@ class FaithulnesswithHHEM(Faithfulness):
         premise = "\n".join(row["contexts"])
         pairs = [(premise, statement) for statement in statements]
         return pairs
-
-    def _create_batch(
-        self, pairs: t.List[t.Tuple[str, str]]
-    ) -> t.Generator[t.List[t.Tuple[str, str]], None, None]:
-        length_of_pairs = len(pairs)
-        for ndx in range(0, length_of_pairs, self.batch_size):
-            yield pairs[ndx : min(ndx + self.batch_size, length_of_pairs)]
 
     async def _ascore(self: t.Self, row: t.Dict, callbacks: Callbacks) -> float:
         """
@@ -391,14 +362,9 @@ class FaithulnesswithHHEM(Faithfulness):
 
         assert isinstance(statements, t.List), "statements must be a list"
 
-        scores = []
         pairs = self._create_pairs(row, statements)
-        for input_pairs in self._create_batch(pairs):  # to avoid OOM
-            batch_scores = (
-                self.nli_classifier.predict(input_pairs).cpu().detach().round()
-            )
-            scores += batch_scores
-        return sum(scores) / len(scores)
+        scores = self.nli_classifier.predict(pairs).detach().numpy().round()
+        return scores.sum() / len(scores)
 
 
 faithfulness = Faithfulness()

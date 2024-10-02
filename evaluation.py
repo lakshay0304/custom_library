@@ -29,21 +29,22 @@ from base_metrics import (
     MetricWithLLM,
     is_reproducable,
 )
-#from ragas.metrics.critique import AspectCritique
+from critique import AspectCritique
 from run_config import RunConfig
 from utils import get_feature_language, safe_nanmean
 
 # from ragas.metrics.critique import AspectCritique
 from validation import (
+    handle_deprecated_ground_truths,
     remap_column_names,
-    validate_required_columns,
-    validate_supported_metrics,
+    validate_column_dtypes,
+    validate_evaluation_modes,
 )
 
 if t.TYPE_CHECKING:
     from langchain_core.callbacks import Callbacks
 
-    from ragas.cost import CostCallbackHandler, TokenUsageParser
+    from cost import CostCallbackHandler, TokenUsageParser
 
 
 @track_was_completed

@@ -10,7 +10,7 @@ import numpy as np
 
 if t.TYPE_CHECKING:
     from base_metrics import Metric
-    from ragas.testset.evolutions import Evolution
+    from evolution import Evolution
 
 DEBUG_ENV_VAR = "RAGAS_DEBUG"
 
